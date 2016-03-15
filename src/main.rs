@@ -57,6 +57,41 @@ fn get_data(path: &String) -> Vec<u8> {
     }
 }
 
+
+fn admin_input(thread_content: Arc<Mutex<HashMap<String, Vec<u8>>>>) {
+    let mut line_buf = String::new();
+
+    loop {
+        line_buf.clear();
+        std::io::stdout().write(b"> ").expect("stdout write");
+        std::io::stdout().flush().expect("stdout flush");
+        std::io::stdin().read_line(&mut line_buf).expect("stdin read");
+        let line = line_buf.lines().next();
+
+        let op = match line {
+            Some(content) => {
+                let mut line = content.split_whitespace();
+                (line.next(), line.next())
+            }
+            _ => (Some(""), Some("")),
+        };
+
+        match op {
+            (Some("reload"), Some(key)) => {
+                match thread_content.lock().unwrap().remove(key) {
+                    Some(_) => println!("removed {}", key),
+                    None => println!("No such asset"),
+                }
+            }
+            (Some("exit"), _) => {
+                std::process::exit(0);
+            }
+            _ => println!("unkown operation"),
+        }
+    }
+}
+
+
 fn main() {
     let content: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
     let thread_content = content.clone();
@@ -70,31 +105,7 @@ fn main() {
     println!("{}", USAGE);
 
     thread::spawn(move || {
-        let mut line = String::new();
-        loop {
-            std::io::stdout().write(b"> ");
-            std::io::stdout().flush();
-            std::io::stdin().read_line(&mut line);
-            let line = line.lines().next();
-            let op = match line {
-                Some(content) => {
-                    let mut line = content.split_whitespace();
-                    (line.next(), line.next())
-                }
-                _ => (Some(""), Some("")),
-            };
-
-
-            match op {
-                (Some("reload"), Some(key)) => {
-                    thread_content.lock().unwrap().remove(key);
-                }
-                (Some("exit"), _) => {
-                    std::process::exit(0);
-                }
-                _ => println!("unkown operation"),
-            };
-        }
+        admin_input(thread_content);
     });
 
     Server::http(&*host)

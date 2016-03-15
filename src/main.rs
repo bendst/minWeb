@@ -4,11 +4,24 @@ use hyper::Server;
 use hyper::server::{Request, Response};
 use hyper::uri::RequestUri;
 use std::fs::File;
-use std::io::prelude::Read;
+use std::io::prelude::{Read, Write};
 use std::io::BufReader;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::env;
+
+const USAGE: &'static str = r#"
+Starting minimal webserver.
+
+Usage: [PORT]
+
+Defaults to 8080.
+
+Commandline options:
+reload [ressource_name] - remove an ressource from the cache.
+exit - terminate the server.
+"#;
 
 fn default() -> Vec<u8> {
     let file = File::open("./html/index.html").expect("open failed");
@@ -45,12 +58,44 @@ fn get_data(path: &String) -> Vec<u8> {
 }
 
 fn main() {
-    let content: Mutex<HashMap<String, Vec<u8>>> = Mutex::new(HashMap::new());
+    let content: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let thread_content = content.clone();
 
     let host = match env::args().nth(1) {
         Some(port) => "127.0.0.1:".to_string() + &port,
         None => "127.0.0.1:8080".to_string(),
     };
+
+
+    println!("{}", USAGE);
+
+    thread::spawn(move || {
+        let mut line = String::new();
+        loop {
+            std::io::stdout().write(b"> ");
+            std::io::stdout().flush();
+            std::io::stdin().read_line(&mut line);
+            let line = line.lines().next();
+            let op = match line {
+                Some(content) => {
+                    let mut line = content.split_whitespace();
+                    (line.next(), line.next())
+                }
+                _ => (Some(""), Some("")),
+            };
+
+
+            match op {
+                (Some("reload"), Some(key)) => {
+                    thread_content.lock().unwrap().remove(key);
+                }
+                (Some("exit"), _) => {
+                    std::process::exit(0);
+                }
+                _ => println!("unkown operation"),
+            };
+        }
+    });
 
     Server::http(&*host)
         .unwrap()
@@ -58,8 +103,7 @@ fn main() {
             let key = unpack(&request.uri);
 
             let has_key = {
-                let content = content.lock().unwrap();
-                content.contains_key(&key)
+                content.lock().unwrap().contains_key(&key)
             };
 
             let data = {

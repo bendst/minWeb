@@ -3,3 +3,5 @@ css
 html
 img
 script
+*.swp
+src/*.swp

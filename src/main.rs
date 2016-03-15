@@ -112,7 +112,6 @@ fn main() {
         .unwrap()
         .handle(move |request: Request, response: Response| {
             let key = unpack(&request.uri);
-
             let has_key = {
                 content.lock().unwrap().contains_key(&key)
             };

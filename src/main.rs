@@ -143,16 +143,16 @@ fn admin_input(thread_content: Cache) {
     }
 }
 
-struct ProcessArgs {
+struct Args {
     port: String,
     daemon: String,
     threads: usize,
 }
 
-impl Default for ProcessArgs {
+impl Default for Args {
     #[inline(always)]
     fn default() -> Self {
-        ProcessArgs {
+        Args {
             port: "8080".to_string(),
             daemon: "".to_string(),
             threads: 10,
@@ -160,51 +160,54 @@ impl Default for ProcessArgs {
     }
 }
 
-fn main() {
-    let mut process_args = ProcessArgs::default();
-
-    let args = env::args().collect::<Vec<String>>();
-
-    for arg in args.iter().enumerate() {
-        match (arg.0, arg.1 as &str) {
-            (pos, "--port") => {
-                process_args.port = env::args().nth(pos + 1).expect("No port");
+impl Args {
+    fn process(&mut self) {
+        for arg in env::args().enumerate() {
+            match (arg.0, &arg.1 as &str) {
+                (pos, "--port") => {
+                    self.port = env::args().nth(pos + 1).expect("No port");
+                }
+                (pos, "-p") => {
+                    self.port = env::args().nth(pos + 1).expect("No port");
+                }
+                (_, e @ "--daemon") => {
+                    self.daemon = e.to_string();
+                }
+                (_, e @ "daemon-child") => {
+                    self.daemon = e.to_string();
+                }
+                (pos, "-t") => {
+                    self.threads = env::args()
+                                       .nth(pos + 1)
+                                       .expect("missing thread count")
+                                       .parse()
+                                       .unwrap();
+                }
+                (_, "--help") => {
+                    println!("{} {}", Blue.paint(USAGE), Blue.paint(OPTION));
+                    exit(0);
+                }
+                (_, "-h") => {
+                    println!("{} {}", Blue.paint(USAGE), Blue.paint(OPTION));
+                    exit(0);
+                }
+                _ => (),
             }
-            (pos, "-p") => {
-                process_args.port = env::args().nth(pos + 1).expect("No port");
-            }
-            (_, e @ "--daemon") => {
-                process_args.daemon = e.to_string();
-            }
-            (_, e @ "daemon-child") => {
-                process_args.daemon = e.to_string();
-            }
-            (pos, "-t") => {
-                process_args.threads = env::args()
-                                           .nth(pos + 1)
-                                           .expect("missing thread count")
-                                           .parse()
-                                           .unwrap();
-            }
-            (_, "--help") => {
-                println!("{} {}", Blue.paint(USAGE), Blue.paint(OPTION));
-                exit(0);
-            }
-            (_, "-h") => {
-                println!("{} {}", Blue.paint(USAGE), Blue.paint(OPTION));
-                exit(0);
-            }
-            _ => (),
         }
     }
+}
 
-    if process_args.daemon == "--daemon" {
+fn main() {
+    let mut arguments = Args::default();
+    arguments.process();
+
+    if arguments.daemon == "--daemon" {
         Command::new(env::args().nth(0).unwrap())
             .arg("--port")
-            .arg(process_args.port)
+            .arg(arguments.port)
             .arg("daemon-child")
             .arg("-t")
-            .arg(process_args.threads.to_string())
+            .arg(arguments.threads.to_string())
             .spawn()
             .expect("Daemon could not be summoned");
     } else {
@@ -213,7 +216,7 @@ fn main() {
         let thread_content = content.clone();
 
         // check whether a port was specified.
-        let host = match &*process_args.port {
+        let host = match &*arguments.port {
             "" => {
                 println!("{} {}", Green.bold().paint(START), Blue.paint(USAGE));
                 "0.0.0.0:8080".to_string()
@@ -227,7 +230,7 @@ fn main() {
             }
         };
 
-        if process_args.daemon != "daemon-child" {
+        if arguments.daemon != "daemon-child" {
             // Spawn the thread for admin input.
             println!("{}", Blue.paint(OPTION));
             thread::spawn(move || {
@@ -242,6 +245,7 @@ fn main() {
                 // The expected behavior after everything is cached, that only read locks will be
                 // acquired which will make the server non-blocking over all threads.
                 let key = unpack(&request.uri);
+
                 let has_key = {
                     content.read().expect("read lock").contains_key(&key)
                 }; // release read lock.
@@ -255,8 +259,10 @@ fn main() {
                         data
                     }
                 }; // release read or write lock dependent on has_key.
+
                 response.send(data.as_slice()).expect("response send");
-            }, process_args.threads)
+
+            }, arguments.threads)
             .expect("Failed to handle client");
     }
 }

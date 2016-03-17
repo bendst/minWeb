@@ -1,3 +1,5 @@
+/// TODO reload anders
+
 extern crate hyper;
 extern crate ansi_term;
 
@@ -12,10 +14,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::env;
+use std::process::Command;
 
 const USAGE: &'static str = r#"
 
-Usage: [PORT]
+Usage: --port [PORT] [--daemon]
 Defaults to 8080."#;
 
 const START: &'static str = r#"
@@ -126,55 +129,107 @@ fn admin_input(thread_content: Cache) {
     }
 }
 
+struct ProcessArgs {
+    port: String,
+    daemon: String,
+    threads: usize,
+}
+
+impl Default for ProcessArgs {
+    #[inline(always)]
+    fn default() -> Self {
+        ProcessArgs {
+            port: "8080".to_string(),
+            daemon: "".to_string(),
+            threads: 10,
+        }
+    }
+}
 
 fn main() {
-    let content: Cache = Arc::new(RwLock::new(HashMap::new()));
-    let thread_content = content.clone();
+    let mut process_args = ProcessArgs::default();
 
-    // check whether a port was specified.
-    let host = match env::args().nth(1) {
-        Some(port) => {
-            println!("{} {} {}.",
-                     Green.bold().paint(START),
-                     Green.bold().paint("on port"),
-                     Red.bold().paint(port.clone()));
-            "0.0.0.0:".to_string() + &port
+    let args = env::args().collect::<Vec<String>>();
+    for arg in args.iter().enumerate() {
+        match (arg.0, arg.1 as &str) {
+            (pos, "--port") => {
+                process_args.port = env::args().nth(pos + 1).expect("No port");
+            }
+            (_, e @ "--daemon") => {
+                process_args.daemon = e.to_string();
+            }
+            (_, e @ "daemon-child") => {
+                process_args.daemon = e.to_string();
+            }
+            (pos, "-t") => {
+                process_args.threads = env::args()
+                                           .nth(pos + 1)
+                                           .expect("missing thread count")
+                                           .parse()
+                                           .unwrap();
+            }
+            _ => (),
         }
-        None => {
-            println!("{} {}", Green.bold().paint(START), Blue.paint(USAGE));
-            "0.0.0.0:8080".to_string()
+    }
+
+    if process_args.daemon == "--daemon" {
+        let mut child = Command::new(env::args().nth(0).unwrap())
+                            .arg("--port ".to_string() + &process_args.port)
+                            .arg("daemon-child")
+                            .arg("-t ".to_string() + &process_args.threads.to_string())
+                            .spawn()
+                            .expect("Daemon could not be summoned");
+        child.wait().expect("Daemon wait failed");
+    } else {
+
+        let content: Cache = Arc::new(RwLock::new(HashMap::new()));
+        let thread_content = content.clone();
+
+        // check whether a port was specified.
+        let host = match &*process_args.port {
+            "" => {
+                println!("{} {}", Green.bold().paint(START), Blue.paint(USAGE));
+                "0.0.0.0:8080".to_string()
+            }
+            port => {
+                println!("{} {} {}.",
+                         Green.bold().paint(START),
+                         Green.bold().paint("on port"),
+                         Red.bold().paint(port.clone()));
+                "0.0.0.0:".to_string() + &port
+            }
+        };
+
+        println!("{}", Blue.paint(OPTION));
+        if process_args.daemon != "daemon-child" {
+            // Spawn the thread for admin input.
+            thread::spawn(move || {
+                admin_input(thread_content);
+            });
         }
-    };
 
-    println!("{}", Blue.paint(OPTION));
+        // Start server
+        Server::http(&*host)
+            .expect("Server creation failed")
+            .handle_threads(move |request: Request, response: Response| {
+                // The expected behavior after everything is cached, that only read locks will be
+                // acquired which will make the server non-blocking over all threads.
+                let key = unpack(&request.uri);
+                let has_key = {
+                    content.read().unwrap().contains_key(&key)
+                }; // release read lock.
 
-    // Spawn the thread for admin input.
-    thread::spawn(move || {
-        admin_input(thread_content);
-    });
-
-    // Start server
-    Server::http(&*host)
-        .expect("Server creation failed")
-        .handle(move |request: Request, response: Response| {
-            // The expected behavior after everything is cached, that only read locks will be
-            // acquired which will make the server non-blocking over all threads.
-            let key = unpack(&request.uri);
-            let has_key = {
-                content.read().unwrap().contains_key(&key)
-            }; // release read lock.
-
-            let data = {
-                if has_key {
-                    content.read().unwrap().get(&key).unwrap().clone()
-                } else {
-                    let data = get_data(&key);
-                    content.write().unwrap().insert(key.clone(), data.clone());
-                    data
-                }
-            }; // release read or write lock dependent on has_key.
-
-            response.send(data.as_slice()).unwrap();
-        })
-        .expect("Failed to handle client");
+                let data = {
+                    if has_key {
+                        content.read().unwrap().get(&key).unwrap().clone()
+                    } else {
+                        let data = get_data(&key);
+                        content.write().unwrap().insert(key.clone(), data.clone());
+                        data
+                    }
+                }; // release read or write lock dependent on has_key.
+                response.send(data.as_slice()).unwrap();
+            }, process_args.threads)
+            .expect("Failed to handle client");
+    }
 }

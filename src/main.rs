@@ -174,13 +174,12 @@ fn main() {
     }
 
     if process_args.daemon == "--daemon" {
-        let mut child = Command::new(env::args().nth(0).unwrap())
-                            .arg("--port ".to_string() + &process_args.port)
-                            .arg("daemon-child")
-                            .arg("-t ".to_string() + &process_args.threads.to_string())
-                            .spawn()
-                            .expect("Daemon could not be summoned");
-        child.wait().expect("Daemon wait failed");
+        Command::new(env::args().nth(0).unwrap())
+            .arg("--port ".to_string() + &process_args.port)
+            .arg("daemon-child")
+            .arg("-t ".to_string() + &process_args.threads.to_string())
+            .spawn()
+            .expect("Daemon could not be summoned");
     } else {
 
         let content: Cache = Arc::new(RwLock::new(HashMap::new()));
@@ -217,19 +216,19 @@ fn main() {
                 // acquired which will make the server non-blocking over all threads.
                 let key = unpack(&request.uri);
                 let has_key = {
-                    content.read().unwrap().contains_key(&key)
+                    content.read().expect("read lock").contains_key(&key)
                 }; // release read lock.
 
                 let data = {
                     if has_key {
-                        content.read().unwrap().get(&key).unwrap().clone()
+                        content.read().expect("read lock").get(&key).unwrap().clone()
                     } else {
                         let data = get_data(&key);
-                        content.write().unwrap().insert(key.clone(), data.clone());
+                        content.write().expect("write lock").insert(key.clone(), data.clone());
                         data
                     }
                 }; // release read or write lock dependent on has_key.
-                response.send(data.as_slice()).unwrap();
+                response.send(data.as_slice()).expect("response send");
             }, process_args.threads)
             .expect("Failed to handle client");
     }

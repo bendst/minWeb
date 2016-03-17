@@ -12,12 +12,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::env;
-use std::process::Command;
+use std::process::{Command, exit};
 
 const USAGE: &'static str = r#"
-
-Usage: --port [PORT] [--daemon]
-Defaults to 8080."#;
+Usage: [-p | --port PORT] [--daemon] [--help | -h] [-t MAX_THREADS]
+Defaults to 8080.
+"#;
 
 const START: &'static str = r#"
 Starting minimal webserver"#;
@@ -25,7 +25,10 @@ Starting minimal webserver"#;
 
 const OPTION: &'static str = r#"
 Commandline options:
-reload [ressource_name] - remove an ressource from the cache.
+reload [NAME] - remove an ressource from the cache.
+reload * - remove all ressources from the cache.
+reload all - remove all ressources from the cache.
+reload - remove all ressources from the cache.
 exit - terminate the server.
 "#;
 
@@ -108,9 +111,19 @@ fn admin_input(thread_content: Cache) {
         };
 
         match op {
-            (Some("reload"), Some("*")) => thread_content.write().unwrap().clear(),
-            (Some("reload"), Some("all")) => thread_content.write().unwrap().clear(),
-            (Some("reload"), None) => thread_content.write().unwrap().clear(),
+            (Some("reload"), Some("*")) => {
+                thread_content.write().unwrap().clear();
+                println!("{}", Green.bold().paint("Cache cleared"));
+            }
+            (Some("reload"), Some("all")) => {
+                thread_content.write().unwrap().clear();
+                println!("{}", Green.bold().paint("Cache cleared"));
+            }
+            (Some("reload"), None) => {
+                thread_content.write().unwrap().clear();
+                println!("{}", Green.bold().paint("Cache cleared"));
+            }
+
             (Some("reload"), Some(key)) => {
                 match thread_content.write().unwrap().remove(key) {
                     Some(_) => {
@@ -123,7 +136,7 @@ fn admin_input(thread_content: Cache) {
             }
             (Some("exit"), _) => {
                 println!("{}", Green.bold().paint("Shutting down"));
-                std::process::exit(0);
+                exit(0);
             }
             _ => println!("{}", Red.bold().paint("unkown operation")),
         }
@@ -151,9 +164,13 @@ fn main() {
     let mut process_args = ProcessArgs::default();
 
     let args = env::args().collect::<Vec<String>>();
+
     for arg in args.iter().enumerate() {
         match (arg.0, arg.1 as &str) {
             (pos, "--port") => {
+                process_args.port = env::args().nth(pos + 1).expect("No port");
+            }
+            (pos, "-p") => {
                 process_args.port = env::args().nth(pos + 1).expect("No port");
             }
             (_, e @ "--daemon") => {
@@ -169,15 +186,25 @@ fn main() {
                                            .parse()
                                            .unwrap();
             }
+            (_, "--help") => {
+                println!("{} {}", Blue.paint(USAGE), Blue.paint(OPTION));
+                exit(0);
+            }
+            (_, "-h") => {
+                println!("{} {}", Blue.paint(USAGE), Blue.paint(OPTION));
+                exit(0);
+            }
             _ => (),
         }
     }
 
     if process_args.daemon == "--daemon" {
         Command::new(env::args().nth(0).unwrap())
-            .arg("--port ".to_string() + &process_args.port)
+            .arg("--port")
+            .arg(process_args.port)
             .arg("daemon-child")
-            .arg("-t ".to_string() + &process_args.threads.to_string())
+            .arg("-t")
+            .arg(process_args.threads.to_string())
             .spawn()
             .expect("Daemon could not be summoned");
     } else {
@@ -200,9 +227,9 @@ fn main() {
             }
         };
 
-        println!("{}", Blue.paint(OPTION));
         if process_args.daemon != "daemon-child" {
             // Spawn the thread for admin input.
+            println!("{}", Blue.paint(OPTION));
             thread::spawn(move || {
                 admin_input(thread_content);
             });

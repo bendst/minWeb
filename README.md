@@ -10,3 +10,8 @@ To run the server
 
 THREAD_MAX defaults to 10  
 PORT defaults to 8080
+
+
+## License
+
+[MIT](./LICENSE.md)

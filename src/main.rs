@@ -28,13 +28,26 @@ reload [ressource_name] - remove an ressource from the cache.
 exit - terminate the server.
 "#;
 
+const SIZE: usize = 4 * 1024;
+type Cache = Arc<RwLock<HashMap<String, Vec<u8>>>>;
+
+
+macro_rules! read_from_file {
+    ($path: expr) => (
+        {
+        let file = File::open($path).expect("open failed ");
+        let mut file = BufReader::new(file);
+        let mut buf = Vec::with_capacity(SIZE);
+        file.read_to_end(&mut buf).expect("read failed");
+        buf
+        }
+    );
+}
+
+
 #[inline(always)]
 fn default() -> Vec<u8> {
-    let file = File::open("./html/index.html").expect("open failed");
-    let mut file = BufReader::new(file);
-    let mut buf = vec![];
-    file.read_to_end(&mut buf).expect("read failed");
-    buf
+    read_from_file!("./html/index.html")
 }
 
 #[inline(always)]
@@ -54,7 +67,7 @@ fn get_data(path: &String) -> Vec<u8> {
         match file {
             Ok(file) => {
                 let mut file = BufReader::new(file);
-                let mut buf = vec![];
+                let mut buf = Vec::with_capacity(SIZE);
                 file.read_to_end(&mut buf).expect("read failed");
                 buf
             }
@@ -66,7 +79,7 @@ fn get_data(path: &String) -> Vec<u8> {
 }
 
 #[inline(always)]
-fn admin_input(thread_content: Arc<RwLock<HashMap<String, Vec<u8>>>>) {
+fn admin_input(thread_content: Cache) {
     let mut line_buf = String::new();
 
     loop {
@@ -100,8 +113,9 @@ fn admin_input(thread_content: Arc<RwLock<HashMap<String, Vec<u8>>>>) {
 }
 
 
+
 fn main() {
-    let content: Arc<RwLock<HashMap<String, Vec<u8>>>> = Arc::new(RwLock::new(HashMap::new()));
+    let content: Cache = Arc::new(RwLock::new(HashMap::new()));
     let thread_content = content.clone();
 
     let host = match env::args().nth(1) {
@@ -122,7 +136,7 @@ fn main() {
     });
 
     Server::http(&*host)
-        .unwrap()
+        .expect("Server creation failed")
         .handle(move |request: Request, response: Response| {
             let key = unpack(&request.uri);
             let has_key = {

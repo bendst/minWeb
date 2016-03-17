@@ -28,7 +28,10 @@ reload [ressource_name] - remove an ressource from the cache.
 exit - terminate the server.
 "#;
 
+/// Default size of vector.
 const SIZE: usize = 4 * 1024;
+
+/// Convenience type for a thread safe Hashmap.
 type Cache = Arc<RwLock<HashMap<String, Vec<u8>>>>;
 
 
@@ -44,12 +47,14 @@ macro_rules! read_from_file {
     );
 }
 
-
+/// Reads the index.html as default action.
 #[inline(always)]
 fn default() -> Vec<u8> {
     read_from_file!("./html/index.html")
 }
 
+
+/// Unpack an Uri to a String.
 #[inline(always)]
 fn unpack(uri: &RequestUri) -> String {
     match uri {
@@ -58,6 +63,8 @@ fn unpack(uri: &RequestUri) -> String {
     }
 }
 
+/// Retrieve data from fs instead of the cache.
+/// In case of an error the index.html is returned.
 #[inline(always)]
 fn get_data(path: &String) -> Vec<u8> {
     let mut data = String::from(".");
@@ -78,6 +85,8 @@ fn get_data(path: &String) -> Vec<u8> {
     }
 }
 
+/// handles admin input after a change to the html, css or js files.
+/// It is possible to remove items from the cache or shutdown the server.
 #[inline(always)]
 fn admin_input(thread_content: Cache) {
     let mut line_buf = String::new();
@@ -113,11 +122,11 @@ fn admin_input(thread_content: Cache) {
 }
 
 
-
 fn main() {
     let content: Cache = Arc::new(RwLock::new(HashMap::new()));
     let thread_content = content.clone();
 
+    // check whether a port was specified.
     let host = match env::args().nth(1) {
         Some(port) => {
             println!("{} on port {}.", START, port);
@@ -131,17 +140,21 @@ fn main() {
 
     println!("{}", OPTION);
 
+    // Spawn the thread for admin input.
     thread::spawn(move || {
         admin_input(thread_content);
     });
 
+    // Start server
     Server::http(&*host)
         .expect("Server creation failed")
         .handle(move |request: Request, response: Response| {
+            // The expected behavior after everything is cached, that only read locks will be
+            // acquired which will make the server non-blocking over all threads.
             let key = unpack(&request.uri);
             let has_key = {
                 content.read().unwrap().contains_key(&key)
-            };
+            }; // release read lock.
 
             let data = {
                 if has_key {
@@ -151,7 +164,7 @@ fn main() {
                     content.write().unwrap().insert(key.clone(), data.clone());
                     data
                 }
-            };
+            }; // release read or write lock dependent on has_key.
 
             response.send(data.as_slice()).unwrap();
         })

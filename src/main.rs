@@ -1,8 +1,10 @@
 extern crate hyper;
+extern crate ansi_term;
 
 use hyper::Server;
 use hyper::server::{Request, Response};
 use hyper::uri::RequestUri;
+use ansi_term::Colour::{Green, Red, Blue, Black};
 use std::fs::File;
 use std::io::prelude::{Read, Write};
 use std::io::BufReader;
@@ -14,9 +16,7 @@ use std::env;
 const USAGE: &'static str = r#"
 
 Usage: [PORT]
-
-Defaults to 8080.
-"#;
+Defaults to 8080."#;
 
 const START: &'static str = r#"
 Starting minimal webserver"#;
@@ -109,14 +109,19 @@ fn admin_input(thread_content: Cache) {
         match op {
             (Some("reload"), Some(key)) => {
                 match thread_content.write().unwrap().remove(key) {
-                    Some(_) => println!("removed {}", key),
-                    None => println!("No such asset"),
+                    Some(_) => {
+                        println!("{} {}",
+                                 Green.bold().paint("removed"),
+                                 Black.bold().paint(key))
+                    }
+                    None => println!("{}", Red.bold().paint("No such asset")),
                 }
             }
             (Some("exit"), _) => {
+                println!("{}", Green.bold().paint("Shutting down"));
                 std::process::exit(0);
             }
-            _ => println!("unkown operation"),
+            _ => println!("{}", Red.bold().paint("unkown operation")),
         }
     }
 }
@@ -129,16 +134,19 @@ fn main() {
     // check whether a port was specified.
     let host = match env::args().nth(1) {
         Some(port) => {
-            println!("{} on port {}.", START, port);
+            println!("{} {} {}.",
+                     Green.bold().paint(START),
+                     Green.bold().paint("on port"),
+                     Red.bold().paint(port.clone()));
             "0.0.0.0:".to_string() + &port
         }
         None => {
-            println!("{} {}", START, USAGE);
+            println!("{} {}", Green.bold().paint(START), Blue.paint(USAGE));
             "0.0.0.0:8080".to_string()
         }
     };
 
-    println!("{}", OPTION);
+    println!("{}", Blue.paint(OPTION));
 
     // Spawn the thread for admin input.
     thread::spawn(move || {

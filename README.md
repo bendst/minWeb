@@ -5,7 +5,7 @@ A minimal webserver to serve static content
 ## Getting started
 To run the server
 ```
-./http_server [--port PORT] [-t THREAD_MAX] [--daemon]
+./http_server [--port PORT | -p PORT] [-t THREAD_MAX] [--daemon] [--help | -h]
 ```
 
 THREAD_MAX defaults to 10  

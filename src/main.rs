@@ -1,5 +1,3 @@
-/// TODO reload anders
-
 extern crate hyper;
 extern crate ansi_term;
 
@@ -110,6 +108,9 @@ fn admin_input(thread_content: Cache) {
         };
 
         match op {
+            (Some("reload"), Some("*")) => thread_content.write().unwrap().clear(),
+            (Some("reload"), Some("all")) => thread_content.write().unwrap().clear(),
+            (Some("reload"), None) => thread_content.write().unwrap().clear(),
             (Some("reload"), Some(key)) => {
                 match thread_content.write().unwrap().remove(key) {
                     Some(_) => {

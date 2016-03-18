@@ -51,6 +51,7 @@ macro_rules! read_from_file {
     );
 }
 
+
 /// Reads the index.html as default action.
 #[inline(always)]
 fn default() -> Vec<u8> {
@@ -66,6 +67,7 @@ fn unpack(uri: &RequestUri) -> String {
         _ => "/".to_string(),
     }
 }
+
 
 /// Retrieve data from fs instead of the cache.
 /// In case of an error the index.html is returned.
@@ -88,6 +90,7 @@ fn get_data(path: &String) -> Vec<u8> {
         default()
     }
 }
+
 
 /// handles admin input after a change to the html, css or js files.
 /// It is possible to remove items from the cache or shutdown the server.
@@ -143,24 +146,28 @@ fn admin_input(thread_content: Cache) {
     }
 }
 
+
+/// Structure holding passed arguments
 struct Args {
     port: String,
     daemon: String,
     threads: usize,
 }
 
-impl Default for Args {
+
+impl Args {
     #[inline(always)]
-    fn default() -> Self {
+    fn new() -> Self {
         Args {
             port: "8080".to_string(),
             daemon: "".to_string(),
             threads: 10,
         }
     }
-}
 
-impl Args {
+
+    /// Process passed commandline arguments and set Args appropriate
+    #[inline(always)]
     fn process(&mut self) {
         for arg in env::args().enumerate() {
             match (arg.0, &arg.1 as &str) {
@@ -197,8 +204,9 @@ impl Args {
     }
 }
 
+
 fn main() {
-    let mut arguments = Args::default();
+    let mut arguments = Args::new();
     arguments.process();
 
     if arguments.daemon == "--daemon" {
@@ -244,16 +252,16 @@ fn main() {
             .handle_threads(move |request: Request, response: Response| {
                 // The expected behavior after everything is cached, that only read locks will be
                 // acquired which will make the server non-blocking over all threads.
+                
                 let key = unpack(&request.uri);
 
                 let has_key = {
                     content.read().expect("read lock").contains_key(&key)
                 }; // release read lock.
 
-                let data = {
-                    if has_key {
-                        content.read().expect("read lock").get(&key).unwrap().clone()
-                    } else {
+                let data = match has_key {
+                    true => content.read().expect("read lock").get(&key).unwrap().clone(),
+                    _ => {
                         let data = get_data(&key);
                         content.write().expect("write lock").insert(key.clone(), data.clone());
                         data

@@ -4,6 +4,7 @@ extern crate ansi_term;
 use hyper::Server;
 use hyper::server::{Request, Response};
 use hyper::uri::RequestUri;
+use hyper::status::StatusCode;
 use ansi_term::Colour::{Green, Red, Blue, Black};
 use std::fs::File;
 use std::io::prelude::{Read, Write};
@@ -84,7 +85,7 @@ fn get_data(path: &String) -> Vec<u8> {
                 file.read_to_end(&mut buf).expect("read failed");
                 buf
             }
-            Err(_) => default(),
+            Err(_) => StatusCode::NotFound.to_string().into(),
         }
     } else {
         default()

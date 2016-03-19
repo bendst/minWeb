@@ -8,7 +8,7 @@ use hyper::status::StatusCode;
 use ansi_term::Colour::{Green, Red, Blue, Black};
 use std::fs::File;
 use std::io::prelude::{Read, Write};
-use std::io::BufReader;
+use std::io::{stdin, stdout, BufReader};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -96,9 +96,9 @@ fn admin_input(thread_content: Cache) {
 
     loop {
         line_buf.clear();
-        std::io::stdout().write(b"> ").expect("stdout write");
-        std::io::stdout().flush().expect("stdout flush");
-        std::io::stdin().read_line(&mut line_buf).expect("stdin read");
+        stdout().write(b"> ").expect("stdout write");
+        stdout().flush().expect("stdout flush");
+        stdin().read_line(&mut line_buf).expect("stdin read");
         let line = line_buf.lines().next();
 
         let op = match line {

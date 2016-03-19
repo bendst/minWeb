@@ -41,10 +41,9 @@ type Cache = Arc<RwLock<HashMap<String, Vec<u8>>>>;
 
 
 macro_rules! read_from_file {
-    ($path: expr) => (
+    ($file: expr) => (
         {
-        let file = File::open($path).expect("open failed ");
-        let mut file = BufReader::new(file);
+        let mut file = BufReader::new($file);
         let mut buf = Vec::with_capacity(SIZE);
         file.read_to_end(&mut buf).expect("read failed");
         buf
@@ -56,7 +55,8 @@ macro_rules! read_from_file {
 /// Reads the index.html as default action.
 #[inline(always)]
 fn default() -> Vec<u8> {
-    read_from_file!("./html/index.html")
+    let file = File::open("./html/index.html").expect("open failed");
+    read_from_file!(file)
 }
 
 
@@ -79,12 +79,7 @@ fn get_data(path: &String) -> Vec<u8> {
         data.push_str(&path);
         let file = File::open(data);
         match file {
-            Ok(file) => {
-                let mut file = BufReader::new(file);
-                let mut buf = Vec::with_capacity(SIZE);
-                file.read_to_end(&mut buf).expect("read failed");
-                buf
-            }
+            Ok(file) => read_from_file!(file),
             Err(_) => StatusCode::NotFound.to_string().into(),
         }
     } else {

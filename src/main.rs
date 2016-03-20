@@ -1,3 +1,6 @@
+mod args;
+mod help;
+
 extern crate hyper;
 extern crate ansi_term;
 
@@ -11,27 +14,12 @@ use std::io::prelude::{Read, Write};
 use std::io::{stdin, stdout, BufReader};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use std::thread;
 use std::env;
+use std::thread;
 use std::process::{Command, exit};
 
-const USAGE: &'static str = r#"
-Usage: [-p | --port PORT] [--daemon] [--help | -h] [-t MAX_THREADS]
-Defaults to 8080.
-"#;
-
-const START: &'static str = r#"
-Starting minimal webserver"#;
-
-
-const OPTION: &'static str = r#"
-Commandline options:
-reload [NAME] - remove an ressource from the cache.
-reload * - remove all ressources from the cache.
-reload all - remove all ressources from the cache.
-reload - remove all ressources from the cache.
-exit - terminate the server.
-"#;
+use args::Args;
+use help::{START, USAGE, OPTION};
 
 /// Default size of vector.
 const SIZE: usize = 4 * 1024;
@@ -65,7 +53,7 @@ fn default() -> Vec<u8> {
 fn unpack(uri: &RequestUri) -> String {
     match uri {
         &RequestUri::AbsolutePath(ref path) => path.clone(),
-        _ => "/".to_string(),
+        _ => "/".to_owned(),
     }
 }
 
@@ -73,17 +61,17 @@ fn unpack(uri: &RequestUri) -> String {
 /// Retrieve data from fs instead of the cache.
 /// In case of an error the index.html is returned.
 #[inline(always)]
-fn get_data(path: &String) -> Vec<u8> {
+fn get_data(path: &String) -> Option<Vec<u8>> {
     let mut data = String::from(".");
     if path != "/" {
         data.push_str(&path);
         let file = File::open(data);
         match file {
-            Ok(file) => read_from_file!(file),
-            Err(_) => StatusCode::NotFound.to_string().into(),
+            Ok(file) => Some(read_from_file!(file)),
+            Err(_) => None,
         }
     } else {
-        default()
+        Some(default())
     }
 }
 
@@ -143,75 +131,17 @@ fn admin_input(thread_content: Cache) {
 }
 
 
-/// Structure holding passed arguments
-struct Args {
-    port: String,
-    daemon: String,
-    threads: usize,
-}
-
-
-impl Args {
-    #[inline(always)]
-    fn new() -> Self {
-        Args {
-            port: "8080".to_string(),
-            daemon: "".to_string(),
-            threads: 10,
-        }
-    }
-
-
-    /// Process passed commandline arguments and set Args appropriate
-    #[inline(always)]
-    fn process(&mut self) {
-        for arg in env::args().enumerate() {
-            match (arg.0, &arg.1 as &str) {
-                (pos, "--port") => {
-                    self.port = env::args().nth(pos + 1).expect("No port");
-                }
-                (pos, "-p") => {
-                    self.port = env::args().nth(pos + 1).expect("No port");
-                }
-                (_, e @ "--daemon") => {
-                    self.daemon = e.to_string();
-                }
-                (_, e @ "daemon-child") => {
-                    self.daemon = e.to_string();
-                }
-                (pos, "-t") => {
-                    self.threads = env::args()
-                                       .nth(pos + 1)
-                                       .expect("missing thread count")
-                                       .parse()
-                                       .unwrap();
-                }
-                (_, "--help") => {
-                    println!("{} {}", Blue.paint(USAGE), Blue.paint(OPTION));
-                    exit(0);
-                }
-                (_, "-h") => {
-                    println!("{} {}", Blue.paint(USAGE), Blue.paint(OPTION));
-                    exit(0);
-                }
-                _ => (),
-            }
-        }
-    }
-}
-
-
 fn main() {
     let mut arguments = Args::new();
     arguments.process();
 
-    if arguments.daemon == "--daemon" {
+    if arguments.daemon() == "--daemon" {
         Command::new(env::args().nth(0).unwrap())
             .arg("--port")
-            .arg(arguments.port)
+            .arg(arguments.port())
             .arg("daemon-child")
             .arg("-t")
-            .arg(arguments.threads.to_string())
+            .arg(arguments.threads().to_string())
             .spawn()
             .expect("Daemon could not be summoned");
     } else {
@@ -220,26 +150,30 @@ fn main() {
         let thread_content = content.clone();
 
         // check whether a port was specified.
-        let host = match &*arguments.port {
+        let host = match &**arguments.port() {
             "" => {
                 println!("{} {}", Green.bold().paint(START), Blue.paint(USAGE));
-                "0.0.0.0:8080".to_string()
+                "0.0.0.0:8080".to_owned()
             }
             port => {
                 println!("{} {} {}.",
                          Green.bold().paint(START),
                          Green.bold().paint("on port"),
                          Red.bold().paint(port.clone()));
-                "0.0.0.0:".to_string() + &port
+                "0.0.0.0:".to_owned() + &port
             }
         };
 
-        if arguments.daemon != "daemon-child" {
+        if arguments.daemon() != "daemon-child" {
             // Spawn the thread for admin input.
             println!("{}", Blue.paint(OPTION));
             thread::spawn(move || {
                 admin_input(thread_content);
             });
+        }
+
+        if arguments.service() != "" {
+
         }
 
         // Start server
@@ -259,14 +193,19 @@ fn main() {
                     true => content.read().expect("read lock").get(&key).unwrap().clone(),
                     _ => {
                         let data = get_data(&key);
-                        content.write().expect("write lock").insert(key.clone(), data.clone());
-                        data
+                        match data {
+                            Some(data) => {
+                                content.write().expect("write lock").insert(key.clone(), data.clone());
+                                data
+                            },
+                            None => StatusCode::NotFound.canonical_reason().unwrap().to_owned().into(),
+                        }
                     }
                 }; // release read or write lock dependent on has_key.
 
                 response.send(data.as_slice()).expect("response send");
 
-            }, arguments.threads)
+            }, arguments.threads())
             .expect("Failed to handle client");
     }
 }

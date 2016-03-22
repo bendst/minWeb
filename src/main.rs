@@ -3,6 +3,7 @@ mod help;
 
 extern crate hyper;
 extern crate ansi_term;
+extern crate libc;
 
 use hyper::Server;
 use hyper::server::{Request, Response};
@@ -10,14 +11,17 @@ use hyper::uri::RequestUri;
 use hyper::status::StatusCode;
 use ansi_term::Colour::{Green, Red, Blue, Black};
 use std::fs::File;
-use std::io::prelude::{Read, Write};
-use std::io::{stdin, stdout, BufReader};
+use std::io::prelude::*;
+use std::io::{stdin, stdout, BufReader, BufWriter};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, Mutex};
+use std::sync::mpsc::{Sender, Receiver};
+use std::sync::mpsc::channel;
 use std::env;
+use std::ffi::CString;
 use std::thread;
-use std::process::{Command, exit};
-
+use std::process::{Command, exit, Stdio};
+use libc::{mkfifo, unlink};
 use args::Args;
 use help::{START, USAGE, OPTION};
 
@@ -122,6 +126,10 @@ fn admin_input(thread_content: Cache) {
                 }
             }
             (Some("exit"), _) => {
+                unsafe {
+                    unlink(CString::new("/tmp/http_service_in.pipe").unwrap().as_ptr());
+                    unlink(CString::new("/tmp/http_service_out.pipe").unwrap().as_ptr());
+                }
                 println!("{}", Green.bold().paint("Shutting down"));
                 exit(0);
             }
@@ -131,9 +139,24 @@ fn admin_input(thread_content: Cache) {
 }
 
 
-fn main() {
+fn shutting_down(signum: i32) {
+    unsafe {
+        unlink(CString::new("/tmp/http_service_in.pipe").unwrap().as_ptr());
+        unlink(CString::new("/tmp/http_service_out.pipe").unwrap().as_ptr());
+    }
+    println!("{}", Green.bold().paint("Shutting down"));
+    exit(0);
+}
+
+pub fn main() {
     let mut arguments = Args::new();
     arguments.process();
+
+    unsafe {
+        let mut action: libc::sigaction = std::mem::zeroed();
+        action.sa_sigaction = shutting_down as usize;
+        libc::sigaction(libc::SIGINT, &action, std::mem::zeroed());
+    }
 
     if arguments.daemon() == "--daemon" {
         Command::new(env::args().nth(0).unwrap())
@@ -141,6 +164,8 @@ fn main() {
             .arg(arguments.port())
             .arg("daemon-child")
             .arg("-t")
+            .arg("--service")
+            .arg(arguments.service())
             .arg(arguments.threads().to_string())
             .spawn()
             .expect("Daemon could not be summoned");
@@ -171,38 +196,79 @@ fn main() {
                 admin_input(thread_content);
             });
         }
+        let service = if arguments.service() != "" {
+            unsafe {
+                mkfifo(CString::new("/tmp/http_service_in.pipe").unwrap().as_ptr(),
+                       libc::S_IRUSR | libc::S_IWUSR);
+                mkfifo(CString::new("/tmp/http_service_out.pipe").unwrap().as_ptr(),
+                       libc::S_IRUSR | libc::S_IWUSR);
+            }
+            Command::new(arguments.service())
+                .spawn()
+                .unwrap()
+        } else {
+            Command::new("").spawn().unwrap()
+        };
 
-        if arguments.service() != "" {
+        let x: Arc<Mutex<(Sender<Vec<u8>>, Receiver<Vec<u8>>)>> = Arc::new(Mutex::new(channel()));
+        let x2: Arc<Mutex<(Sender<Vec<u8>>, Receiver<Vec<u8>>)>> = Arc::new(Mutex::new(channel()));
+        let x_1 = x.clone();
+        let x_2 = x2.clone();
 
-        }
+        thread::spawn(move || {
+            let in_fd = File::open("/tmp/http_service_in.pipe").expect("could not open fifo in");
+            let mut in_fd = BufWriter::new(in_fd);
+
+            let out_fd = File::open("/tmp/http_service_out.pipe").expect("could not open fifo out");
+            let mut out_fd = BufReader::new(out_fd);
+
+            loop {
+                let incoming = x_1.lock().unwrap().1.recv().unwrap();
+                in_fd.write_all(incoming.as_slice());
+
+                let mut out_data = vec![];
+                out_fd.read_to_end(&mut out_data);
+                x_2.lock().unwrap().0.send(out_data).unwrap();
+            }
+        });
+
+        let x_11 = x.clone();
+        let x_22 = x2.clone();
 
         // Start server
         Server::http(&*host)
             .expect("Server creation failed")
-            .handle_threads(move |request: Request, response: Response| {
+            .handle_threads(move |mut request: Request, response: Response| {
                 // The expected behavior after everything is cached, that only read locks will be
                 // acquired which will make the server non-blocking over all threads.
                 
                 let key = unpack(&request.uri);
+                
+                let data = if key.contains("service") {
+                    let mut service_data = vec![];
+                    request.read_to_end(&mut service_data).expect("read failed");
+                    x_11.lock().unwrap().0.send(service_data).unwrap();
+                    x_22.lock().unwrap().1.recv().unwrap()
+                } else {
+                    let has_key = {
+                        content.read().expect("read lock").contains_key(&key)
+                    }; // release read lock.
 
-                let has_key = {
-                    content.read().expect("read lock").contains_key(&key)
-                }; // release read lock.
-
-                let data = match has_key {
-                    true => content.read().expect("read lock").get(&key).unwrap().clone(),
-                    _ => {
-                        let data = get_data(&key);
-                        match data {
-                            Some(data) => {
-                                content.write().expect("write lock").insert(key.clone(), data.clone());
-                                data
-                            },
-                            None => StatusCode::NotFound.canonical_reason().unwrap().to_owned().into(),
+                    let data = match has_key {
+                        true => content.read().expect("read lock").get(&key).unwrap().clone(),
+                        _ => {
+                            let data = get_data(&key);
+                            match data {
+                                Some(data) => {
+                                    content.write().expect("write lock").insert(key.clone(), data.clone());
+                                    data
+                                },
+                                None => StatusCode::NotFound.canonical_reason().unwrap().to_owned().into(),
+                            }
                         }
-                    }
-                }; // release read or write lock dependent on has_key.
-
+                    }; // release read or write lock dependent on has_key.
+                    data
+                };
                 response.send(data.as_slice()).expect("response send");
 
             }, arguments.threads())

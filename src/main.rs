@@ -20,8 +20,8 @@ use std::io::prelude::*;
 use std::io::{BufReader, BufWriter};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock, Mutex};
-use std::sync::mpsc::{Sender, Receiver};
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{SyncSender, Receiver};
+use std::sync::mpsc::sync_channel;
 
 use args::Args;
 use util::{START, USAGE, Cache};
@@ -76,8 +76,7 @@ fn get_data(path: &String) -> Option<Vec<u8>> {
     }
 }
 
-fn process_io(receiver: Arc<Mutex<Receiver<Vec<u8>>>>, sender: Arc<Mutex<Sender<Vec<u8>>>>) {
-    let sender = sender.clone();
+fn process_io(receiver: Receiver<Vec<u8>>, sender: SyncSender<Vec<u8>>) {
     thread::spawn(move || {
         let in_fd = File::open("/tmp/http_service_in.pipe").expect("could not open fifo in");
         let mut in_fd = BufWriter::new(in_fd);
@@ -86,16 +85,15 @@ fn process_io(receiver: Arc<Mutex<Receiver<Vec<u8>>>>, sender: Arc<Mutex<Sender<
         let mut out_fd = BufReader::new(out_fd);
 
         loop {
-            let incoming = receiver.lock().unwrap().recv().unwrap();
+            let incoming = receiver.recv().unwrap();
             in_fd.write_all(incoming.clone().as_slice()).expect("write failed");
 
             let mut out_data = vec![];
             out_fd.read_to_end(&mut out_data).expect("read failed");
-            sender.lock().unwrap().send(out_data).unwrap();
+            sender.send(out_data).unwrap();
         }
     });
 }
-
 
 
 pub fn main() {
@@ -121,7 +119,6 @@ pub fn main() {
         let content: Cache = Arc::new(RwLock::new(HashMap::new()));
         let thread_content = content.clone();
 
-
         // check whether a port was specified.
         let host = match &**arguments.port() {
             "" => {
@@ -140,16 +137,20 @@ pub fn main() {
         arguments.make_daemon(thread_content);
         arguments.make_service();
 
+        // Channel for communication between the server thread
+        // and the service thread
+        let (sender_x, receiver_x) = sync_channel(0);
+        let (sender_y, receiver_y) = sync_channel(0);
 
-        let (sender_x, receiver_x) = channel();
-        let (sender_y, receiver_y) = channel();
+        let sender_x = match arguments.has_service() {
+            true => Mutex::new(Some(sender_x)),
+            _ => Mutex::new(None),
+        };
 
-        let sender_x = Arc::new(Mutex::new(sender_x));
-        let sender_y = Arc::new(Mutex::new(sender_y));
-        let receiver_x = Arc::new(Mutex::new(receiver_x));
-        let receiver_y = Arc::new(Mutex::new(receiver_y));
+        let receiver_y = Mutex::new(receiver_y);
 
         process_io(receiver_x, sender_y);
+
 
 
         // Start server
@@ -162,10 +163,18 @@ pub fn main() {
                 let key = unpack(&request.uri);
                 
                 let data = if key.contains("service") {
-                    let mut service_data = vec![];
-                    request.read_to_end(&mut service_data).expect("read failed");
-                    sender_x.lock().unwrap().send(service_data).unwrap();
-                    receiver_y.lock().unwrap().recv().unwrap()
+                    let sender_x = sender_x.lock().unwrap().clone();
+                    
+                    // In case of that no service was created, but the client trys anyways
+                    match sender_x {
+                        Some(sender_x) => {
+                            let mut service_data = vec![];
+                            request.read_to_end(&mut service_data).expect("read failed");
+                            sender_x.send(service_data).unwrap();
+                            receiver_y.lock().unwrap().recv().unwrap()
+                        },
+                        None => "undefined".to_owned().into() 
+                    }
                 } else {
                     let has_key = {
                         content.read().expect("read lock").contains_key(&key)

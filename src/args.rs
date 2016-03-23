@@ -44,6 +44,10 @@ impl Args {
         &self.service
     }
 
+    pub fn has_service(&self) -> bool {
+        &self.service != ""
+    }
+
     /// Process passed commandline arguments and set Args appropriate
     #[inline(always)]
     pub fn process(&mut self) {

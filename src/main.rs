@@ -1,36 +1,33 @@
-mod args;
-mod help;
-
 extern crate hyper;
 extern crate ansi_term;
 extern crate libc;
+
+mod args;
+mod util;
+mod cfi;
 
 use hyper::Server;
 use hyper::server::{Request, Response};
 use hyper::uri::RequestUri;
 use hyper::status::StatusCode;
-use ansi_term::Colour::{Green, Red, Blue, Black};
+use ansi_term::Colour::{Green, Red, Blue};
+
+use std::env;
+use std::thread;
+use std::process::Command;
 use std::fs::File;
 use std::io::prelude::*;
-use std::io::{stdin, stdout, BufReader, BufWriter};
+use std::io::{BufReader, BufWriter};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock, Mutex};
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc::channel;
-use std::env;
-use std::ffi::CString;
-use std::thread;
-use std::process::{Command, exit, Stdio};
-use libc::{mkfifo, unlink};
+
 use args::Args;
-use help::{START, USAGE, OPTION};
+use util::{START, USAGE, Cache};
 
 /// Default size of vector.
 const SIZE: usize = 4 * 1024;
-
-/// Convenience type for a thread safe Hashmap.
-type Cache = Arc<RwLock<HashMap<String, Vec<u8>>>>;
-
 
 macro_rules! read_from_file {
     ($file: expr) => (
@@ -79,84 +76,34 @@ fn get_data(path: &String) -> Option<Vec<u8>> {
     }
 }
 
+fn process_io(receiver: Arc<Mutex<Receiver<Vec<u8>>>>, sender: Arc<Mutex<Sender<Vec<u8>>>>) {
+    let sender = sender.clone();
+    thread::spawn(move || {
+        let in_fd = File::open("/tmp/http_service_in.pipe").expect("could not open fifo in");
+        let mut in_fd = BufWriter::new(in_fd);
 
-/// handles admin input after a change to the html, css or js files.
-/// It is possible to remove items from the cache or shutdown the server.
-#[inline(always)]
-fn admin_input(thread_content: Cache) {
-    let mut line_buf = String::new();
+        let out_fd = File::open("/tmp/http_service_out.pipe").expect("could not open fifo out");
+        let mut out_fd = BufReader::new(out_fd);
 
-    loop {
-        line_buf.clear();
-        stdout().write(b"> ").expect("stdout write");
-        stdout().flush().expect("stdout flush");
-        stdin().read_line(&mut line_buf).expect("stdin read");
-        let line = line_buf.lines().next();
+        loop {
+            let incoming = receiver.lock().unwrap().recv().unwrap();
+            in_fd.write_all(incoming.clone().as_slice()).expect("write failed");
 
-        let op = match line {
-            Some(content) => {
-                let mut line = content.split_whitespace();
-                (line.next(), line.next())
-            }
-            _ => (Some(""), Some("")),
-        };
-
-        match op {
-            (Some("reload"), Some("*")) => {
-                thread_content.write().unwrap().clear();
-                println!("{}", Green.bold().paint("Cache cleared"));
-            }
-            (Some("reload"), Some("all")) => {
-                thread_content.write().unwrap().clear();
-                println!("{}", Green.bold().paint("Cache cleared"));
-            }
-            (Some("reload"), None) => {
-                thread_content.write().unwrap().clear();
-                println!("{}", Green.bold().paint("Cache cleared"));
-            }
-
-            (Some("reload"), Some(key)) => {
-                match thread_content.write().unwrap().remove(key) {
-                    Some(_) => {
-                        println!("{} {}",
-                                 Green.bold().paint("removed"),
-                                 Black.bold().paint(key))
-                    }
-                    None => println!("{}", Red.bold().paint("No such asset")),
-                }
-            }
-            (Some("exit"), _) => {
-                unsafe {
-                    unlink(CString::new("/tmp/http_service_in.pipe").unwrap().as_ptr());
-                    unlink(CString::new("/tmp/http_service_out.pipe").unwrap().as_ptr());
-                }
-                println!("{}", Green.bold().paint("Shutting down"));
-                exit(0);
-            }
-            _ => println!("{}", Red.bold().paint("unkown operation")),
+            let mut out_data = vec![];
+            out_fd.read_to_end(&mut out_data).expect("read failed");
+            sender.lock().unwrap().send(out_data).unwrap();
         }
-    }
+    });
 }
 
 
-fn shutting_down(signum: i32) {
-    unsafe {
-        unlink(CString::new("/tmp/http_service_in.pipe").unwrap().as_ptr());
-        unlink(CString::new("/tmp/http_service_out.pipe").unwrap().as_ptr());
-    }
-    println!("{}", Green.bold().paint("Shutting down"));
-    exit(0);
-}
 
 pub fn main() {
     let mut arguments = Args::new();
     arguments.process();
 
-    unsafe {
-        let mut action: libc::sigaction = std::mem::zeroed();
-        action.sa_sigaction = shutting_down as usize;
-        libc::sigaction(libc::SIGINT, &action, std::mem::zeroed());
-    }
+    cfi::sigaction(libc::SIGINT, util::shutting_down);
+    cfi::sigaction(libc::SIGTERM, util::shutting_down);
 
     if arguments.daemon() == "--daemon" {
         Command::new(env::args().nth(0).unwrap())
@@ -164,15 +111,16 @@ pub fn main() {
             .arg(arguments.port())
             .arg("daemon-child")
             .arg("-t")
+            .arg(arguments.threads().to_string())
             .arg("--service")
             .arg(arguments.service())
-            .arg(arguments.threads().to_string())
             .spawn()
             .expect("Daemon could not be summoned");
     } else {
 
         let content: Cache = Arc::new(RwLock::new(HashMap::new()));
         let thread_content = content.clone();
+
 
         // check whether a port was specified.
         let host = match &**arguments.port() {
@@ -189,51 +137,20 @@ pub fn main() {
             }
         };
 
-        if arguments.daemon() != "daemon-child" {
-            // Spawn the thread for admin input.
-            println!("{}", Blue.paint(OPTION));
-            thread::spawn(move || {
-                admin_input(thread_content);
-            });
-        }
-        let service = if arguments.service() != "" {
-            unsafe {
-                mkfifo(CString::new("/tmp/http_service_in.pipe").unwrap().as_ptr(),
-                       libc::S_IRUSR | libc::S_IWUSR);
-                mkfifo(CString::new("/tmp/http_service_out.pipe").unwrap().as_ptr(),
-                       libc::S_IRUSR | libc::S_IWUSR);
-            }
-            Command::new(arguments.service())
-                .spawn()
-                .unwrap()
-        } else {
-            Command::new("").spawn().unwrap()
-        };
+        arguments.make_daemon(thread_content);
+        arguments.make_service();
 
-        let x: Arc<Mutex<(Sender<Vec<u8>>, Receiver<Vec<u8>>)>> = Arc::new(Mutex::new(channel()));
-        let x2: Arc<Mutex<(Sender<Vec<u8>>, Receiver<Vec<u8>>)>> = Arc::new(Mutex::new(channel()));
-        let x_1 = x.clone();
-        let x_2 = x2.clone();
 
-        thread::spawn(move || {
-            let in_fd = File::open("/tmp/http_service_in.pipe").expect("could not open fifo in");
-            let mut in_fd = BufWriter::new(in_fd);
+        let (sender_x, receiver_x) = channel();
+        let (sender_y, receiver_y) = channel();
 
-            let out_fd = File::open("/tmp/http_service_out.pipe").expect("could not open fifo out");
-            let mut out_fd = BufReader::new(out_fd);
+        let sender_x = Arc::new(Mutex::new(sender_x));
+        let sender_y = Arc::new(Mutex::new(sender_y));
+        let receiver_x = Arc::new(Mutex::new(receiver_x));
+        let receiver_y = Arc::new(Mutex::new(receiver_y));
 
-            loop {
-                let incoming = x_1.lock().unwrap().1.recv().unwrap();
-                in_fd.write_all(incoming.as_slice());
+        process_io(receiver_x, sender_y);
 
-                let mut out_data = vec![];
-                out_fd.read_to_end(&mut out_data);
-                x_2.lock().unwrap().0.send(out_data).unwrap();
-            }
-        });
-
-        let x_11 = x.clone();
-        let x_22 = x2.clone();
 
         // Start server
         Server::http(&*host)
@@ -247,8 +164,8 @@ pub fn main() {
                 let data = if key.contains("service") {
                     let mut service_data = vec![];
                     request.read_to_end(&mut service_data).expect("read failed");
-                    x_11.lock().unwrap().0.send(service_data).unwrap();
-                    x_22.lock().unwrap().1.recv().unwrap()
+                    sender_x.lock().unwrap().send(service_data).unwrap();
+                    receiver_y.lock().unwrap().recv().unwrap()
                 } else {
                     let has_key = {
                         content.read().expect("read lock").contains_key(&key)
@@ -269,6 +186,7 @@ pub fn main() {
                     }; // release read or write lock dependent on has_key.
                     data
                 };
+
                 response.send(data.as_slice()).expect("response send");
 
             }, arguments.threads())

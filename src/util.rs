@@ -28,13 +28,12 @@ exit - terminate the server.
 "#;
 
 pub fn shutting_down(_: i32) {
-    let mut path = env::temp_dir();
-    path.push("http_service_in.pipe");
+    let path = env::temp_dir().join("http_service_in.pipe");
     cfi::unlink(path.to_str().unwrap());
 
-    let mut path = env::temp_dir();
-    path.push("http_service_out.pipe");
+    let path = env::temp_dir().join("http_service_out.pipe");
     cfi::unlink(path.to_str().unwrap());
+
     println!("{}", Green.bold().paint("Shutting down"));
     exit(0);
 }

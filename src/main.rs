@@ -78,10 +78,12 @@ fn get_data(path: &String) -> Option<Vec<u8>> {
 
 fn process_io(receiver: Receiver<Vec<u8>>, sender: SyncSender<Vec<u8>>) {
     thread::spawn(move || {
-        let in_fd = File::open("/tmp/http_service_in.pipe").expect("could not open fifo in");
+        let path = env::temp_dir().join("http_service_in.pipe");
+        let in_fd = File::open(path).expect("could not open fifo in");
         let mut in_fd = BufWriter::new(in_fd);
 
-        let out_fd = File::open("/tmp/http_service_out.pipe").expect("could not open fifo out");
+        let path = env::temp_dir().join("http_service_out.pipe");
+        let out_fd = File::open(path).expect("could not open fifo out");
         let mut out_fd = BufReader::new(out_fd);
 
         loop {
@@ -142,15 +144,14 @@ pub fn main() {
         let (sender_x, receiver_x) = sync_channel(0);
         let (sender_y, receiver_y) = sync_channel(0);
 
+        process_io(receiver_x, sender_y);
+
         let sender_x = match arguments.has_service() {
             true => Mutex::new(Some(sender_x)),
             _ => Mutex::new(None),
         };
 
         let receiver_y = Mutex::new(receiver_y);
-
-        process_io(receiver_x, sender_y);
-
 
 
         // Start server
@@ -165,7 +166,7 @@ pub fn main() {
                 let data = if key.contains("service") {
                     let sender_x = sender_x.lock().unwrap().clone();
                     
-                    // In case of that no service was created, but the client trys anyways
+                    // In case of that no service was created, but the client tries anyways
                     match sender_x {
                         Some(sender_x) => {
                             let mut service_data = vec![];

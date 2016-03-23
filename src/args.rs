@@ -90,12 +90,10 @@ impl Args {
 
     pub fn make_service(&self) {
         if self.service != "" {
-            let mut path = env::temp_dir();
-            path.push("http_service_in.pipe");
+            let path = env::temp_dir().join("http_service_in.pipe");
             mkfifo(path.to_str().unwrap(), libc::S_IRUSR | libc::S_IWUSR);
 
-            let mut path = env::temp_dir();
-            path.push("http_service_out.pipe");
+            let path = env::temp_dir().join("http_service_out.pipe");
             mkfifo(path.to_str().unwrap(), libc::S_IRUSR | libc::S_IWUSR);
             Command::new(&self.service).spawn().unwrap();
         }

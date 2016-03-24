@@ -76,22 +76,27 @@ fn get_data(path: &String) -> Option<Vec<u8>> {
     }
 }
 
+#[inline(always)]
 fn process_io(receiver: Receiver<Vec<u8>>, sender: SyncSender<Vec<u8>>) {
     thread::spawn(move || {
         let path = env::temp_dir().join("http_service_in.pipe");
-        let in_fd = File::open(path).expect("could not open fifo in");
-        let mut in_fd = BufWriter::new(in_fd);
+        let mut out_fd = File::create(path).expect("read out pipe");
 
         let path = env::temp_dir().join("http_service_out.pipe");
-        let out_fd = File::open(path).expect("could not open fifo out");
-        let mut out_fd = BufReader::new(out_fd);
+        let mut in_fd = File::open(path).expect("read in pipe");
 
         loop {
             let incoming = receiver.recv().unwrap();
-            in_fd.write_all(incoming.clone().as_slice()).expect("write failed");
+            out_fd.write_all(incoming.as_slice()).expect("write failed");
+
+            println!("write success");
 
             let mut out_data = vec![];
-            out_fd.read_to_end(&mut out_data).expect("read failed");
+            in_fd.read_to_end(&mut out_data).expect("read failed");
+
+            println!("read success");
+
+            println!("Out {:?}", String::from_utf8(out_data.clone()).unwrap());
             sender.send(out_data).unwrap();
         }
     });
@@ -144,7 +149,9 @@ pub fn main() {
         let (sender_x, receiver_x) = sync_channel(0);
         let (sender_y, receiver_y) = sync_channel(0);
 
-        process_io(receiver_x, sender_y);
+        if arguments.has_service() {
+            process_io(receiver_x, sender_y);
+        }
 
         let sender_x = match arguments.has_service() {
             true => Mutex::new(Some(sender_x)),
@@ -165,13 +172,15 @@ pub fn main() {
                 
                 let data = if key.contains("service") {
                     let sender_x = sender_x.lock().unwrap().clone();
-                    
+
                     // In case of that no service was created, but the client tries anyways
                     match sender_x {
                         Some(sender_x) => {
                             let mut service_data = vec![];
                             request.read_to_end(&mut service_data).expect("read failed");
+                            println!("{:?}", String::from_utf8(service_data.clone()).unwrap());
                             sender_x.send(service_data).unwrap();
+                            println!("waiting");
                             receiver_y.lock().unwrap().recv().unwrap()
                         },
                         None => "undefined".to_owned().into() 

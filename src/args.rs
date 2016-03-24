@@ -1,5 +1,4 @@
 use ansi_term::Colour::{Blue, Green, Red, Black};
-use libc;
 
 use std::env;
 use std::thread;
@@ -91,10 +90,10 @@ impl Args {
     pub fn make_service(&self) {
         if self.service != "" {
             let path = env::temp_dir().join("http_service_in.pipe");
-            mkfifo(path.to_str().unwrap(), libc::S_IRUSR | libc::S_IWUSR);
+            mkfifo(path.to_str().unwrap());
 
             let path = env::temp_dir().join("http_service_out.pipe");
-            mkfifo(path.to_str().unwrap(), libc::S_IRUSR | libc::S_IWUSR);
+            mkfifo(path.to_str().unwrap());
             Command::new(&self.service).spawn().unwrap();
         }
     }

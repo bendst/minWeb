@@ -80,24 +80,21 @@ fn get_data(path: &String) -> Option<Vec<u8>> {
 fn process_io(receiver: Receiver<Vec<u8>>, sender: SyncSender<Vec<u8>>) {
     thread::spawn(move || {
         let path = env::temp_dir().join("http_service_in.pipe");
-        let mut out_fd = File::create(path).expect("read out pipe");
+        let mut out_fd = File::create(path).expect("write out pipe");
 
         let path = env::temp_dir().join("http_service_out.pipe");
-        let mut in_fd = File::open(path).expect("read in pipe");
+        let in_fd = File::open(path).expect("read in pipe");
+        let mut in_fd = BufReader::new(in_fd);
 
         loop {
-            let incoming = receiver.recv().unwrap();
-            out_fd.write_all(incoming.as_slice()).expect("write failed");
+            let mut incoming = receiver.recv().unwrap();
+            incoming.push('\n' as u8);
+            out_fd.write(incoming.as_slice()).expect("write failed");
 
-            println!("write success");
+            let mut out_data = String::new();
+            in_fd.read_line(&mut out_data).expect("read failed");
 
-            let mut out_data = vec![];
-            in_fd.read_to_end(&mut out_data).expect("read failed");
-
-            println!("read success");
-
-            println!("Out {:?}", String::from_utf8(out_data.clone()).unwrap());
-            sender.send(out_data).unwrap();
+            sender.send(out_data.into_bytes()).unwrap();
         }
     });
 }
@@ -146,8 +143,8 @@ pub fn main() {
 
         // Channel for communication between the server thread
         // and the service thread
-        let (sender_x, receiver_x) = sync_channel(0);
-        let (sender_y, receiver_y) = sync_channel(0);
+        let (sender_x, receiver_x) = sync_channel(1);
+        let (sender_y, receiver_y) = sync_channel(1);
 
         if arguments.has_service() {
             process_io(receiver_x, sender_y);
@@ -178,9 +175,7 @@ pub fn main() {
                         Some(sender_x) => {
                             let mut service_data = vec![];
                             request.read_to_end(&mut service_data).expect("read failed");
-                            println!("{:?}", String::from_utf8(service_data.clone()).unwrap());
                             sender_x.send(service_data).unwrap();
-                            println!("waiting");
                             receiver_y.lock().unwrap().recv().unwrap()
                         },
                         None => "undefined".to_owned().into() 

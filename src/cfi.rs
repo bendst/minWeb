@@ -12,7 +12,10 @@ pub fn mkfifo(fifo: &str) {
     let mode = libc::S_IRUSR | libc::S_IWUSR | libc::S_IRGRP | libc::S_IROTH;
     unsafe {
         let location = CString::new(fifo).unwrap().as_ptr();
-        libc::mkfifo(location, mode);
+        match libc::mkfifo(location, mode) {
+            0 => (),
+            _ => panic!("no fifo could be created"),
+        }
     }
 }
 

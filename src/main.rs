@@ -200,7 +200,6 @@ pub fn main() {
                     }; // release read or write lock dependent on has_key.
                     data
                 };
-
                 response.send(data.as_slice()).expect("response send");
 
             }, arguments.threads())

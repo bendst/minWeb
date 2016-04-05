@@ -17,7 +17,7 @@ use std::thread;
 use std::process::Command;
 use std::fs::File;
 use std::io::prelude::*;
-use std::io::{BufReader, BufWriter};
+use std::io::BufReader;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock, Mutex};
 use std::sync::mpsc::{SyncSender, Receiver};
@@ -81,7 +81,6 @@ fn process_io(receiver: Receiver<Vec<u8>>, sender: SyncSender<Vec<u8>>) {
     thread::spawn(move || {
         let path = env::temp_dir().join("http_service_in.pipe");
         let mut out_fd = File::create(path).expect("write out pipe");
-
         let path = env::temp_dir().join("http_service_out.pipe");
         let in_fd = File::open(path).expect("read in pipe");
         let mut in_fd = BufReader::new(in_fd);

@@ -27,22 +27,28 @@ impl Args {
             service: "".to_owned(),
         }
     }
+
+    #[inline(always)]
     pub fn port(&self) -> &String {
         &self.port
     }
 
+    #[inline(always)]
     pub fn daemon(&self) -> &String {
         &self.daemon
     }
 
+    #[inline(always)]
     pub fn threads(&self) -> usize {
         self.threads
     }
 
+    #[inline(always)]
     pub fn service(&self) -> &String {
         &self.service
     }
 
+    #[inline(always)]
     pub fn has_service(&self) -> bool {
         &self.service != ""
     }
@@ -87,6 +93,7 @@ impl Args {
         }
     }
 
+    #[inline(always)]
     pub fn make_service(&self) {
         if self.service != "" {
             let path = env::temp_dir().join("http_service_in.pipe");
@@ -99,6 +106,7 @@ impl Args {
     }
 
 
+    #[inline(always)]
     pub fn make_daemon(&self, cache: Cache) {
         if self.daemon != "daemon-child" {
             println!("{}", Blue.paint(OPTION));

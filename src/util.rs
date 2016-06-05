@@ -10,8 +10,12 @@ pub type Cache = Arc<RwLock<HashMap<String, Vec<u8>>>>;
 
 
 pub const USAGE: &'static str = r#"
-Usage: [-p | --port PORT] [--daemon] [--help | -h] [-t MAX_THREADS]
-Defaults to 8080.
+Usage: [-p | --port PORT] [--daemon] [--help | -h] [-t MAX_THREADS] [--service]
+Defaults to port 8080.
+
+--service : A service which can communicate over the server.
+-t : The amount of threads.
+-p|--port : Port of the server.
 "#;
 
 pub const START: &'static str = r#"

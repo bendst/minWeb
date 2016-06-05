@@ -102,7 +102,6 @@ fn process_io(receiver: Receiver<Vec<u8>>, sender: SyncSender<Vec<u8>>) {
 pub fn main() {
     let mut arguments = Args::new();
     arguments.process();
-
     cfi::sigaction(libc::SIGINT, util::shutting_down);
     cfi::sigaction(libc::SIGTERM, util::shutting_down);
 

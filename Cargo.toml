@@ -7,4 +7,3 @@ authors = ["Ben Stuart <mail@bstuart.de>"]
 hyper = "0.8.0"
 ansi_term = "0.7"
 libc = "0.2"
-

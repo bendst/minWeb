@@ -72,10 +72,10 @@ impl Args {
                 }
                 (pos, "-t") => {
                     self.threads = env::args()
-                                       .nth(pos + 1)
-                                       .expect("missing thread count")
-                                       .parse()
-                                       .unwrap();
+                        .nth(pos + 1)
+                        .expect("missing thread count")
+                        .parse()
+                        .unwrap();
                 }
                 (_, "--help") => {
                     println!("{} {}", Blue.paint(USAGE), Blue.paint(OPTION));
@@ -129,13 +129,10 @@ impl Args {
             stdin().read_line(&mut line_buf).expect("stdin read");
             let line = line_buf.lines().next();
 
-            let op = match line {
-                Some(content) => {
-                    let mut line = content.split_whitespace();
-                    (line.next(), line.next())
-                }
-                _ => (Some(""), Some("")),
-            };
+            let op = line.map_or((Some(""), Some("")), |content| {
+                let mut line = content.split_whitespace();
+                (line.next(), line.next())
+            });
 
             match op {
                 (Some("reload"), Some("*")) => {

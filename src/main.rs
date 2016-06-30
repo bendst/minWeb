@@ -162,45 +162,43 @@ pub fn main() {
             .handle_threads(move |mut request: Request, response: Response| {
                 // The expected behavior after everything is cached, that only read locks will be
                 // acquired which will make the server non-blocking over all threads.
-                
-                let key = unpack(&request.uri);
-                
-                let data = if key.contains("service") {
-                    let sender_x = sender_x.lock().unwrap().clone();
 
+                let key = unpack(&request.uri);
+
+                let data = if key.contains("service") {
                     // In case of that no service was created, but the client tries anyways
-                    match sender_x {
-                        Some(sender_x) => {
+                    sender_x.lock()
+                        .unwrap()
+                        .as_ref()
+                        .map_or("undefined".to_owned().into(), |sender_x| {
                             let mut service_data = vec![];
                             request.read_to_end(&mut service_data).expect("read failed");
                             sender_x.send(service_data).unwrap();
                             receiver_y.lock().unwrap().recv().unwrap()
-                        },
-                        None => "undefined".to_owned().into() 
-                    }
+                        })
                 } else {
                     let has_key = {
                         content.read().expect("read lock").contains_key(&key)
                     }; // release read lock.
 
-                    let data = match has_key {
+                    match has_key {
                         true => content.read().expect("read lock").get(&key).unwrap().clone(),
                         _ => {
-                            let data = get_data(&key);
-                            match data {
-                                Some(data) => {
-                                    content.write().expect("write lock").insert(key.clone(), data.clone());
-                                    data
-                                },
-                                None => StatusCode::NotFound.canonical_reason().unwrap().to_owned().into(),
-                            }
+                            get_data(&key).map_or(StatusCode::NotFound.canonical_reason()
+                                                      .map(|x| x.into())
+                                                      .unwrap(),
+                                                  |data| {
+                                                      content.write()
+                                                          .expect("write lock")
+                                                          .insert(key.clone(), data.clone());
+                                                      data
+                                                  })
                         }
-                    }; // release read or write lock dependent on has_key.
-                    data
+                    } // release read or write lock dependent on has_key.
                 };
                 response.send(data.as_slice()).expect("response send");
-
-            }, arguments.threads())
+            },
+                            arguments.threads())
             .expect("Failed to handle client");
     }
 }
